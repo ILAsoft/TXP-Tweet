@@ -1,7 +1,7 @@
 <?php
 
 $plugin['name'] = 'arc_twitter';
-$plugin['version'] = '2.0beta';
+$plugin['version'] = '2.01';
 $plugin['author'] = 'Andy Carter';
 $plugin['author_uri'] = 'http://redhotchilliproject.com/';
 $plugin['description'] = '<a href="http://www.twitter.com">Twitter</a> for Textpattern';
@@ -2133,6 +2133,8 @@ h3. Usage
 |_. Attribute|_. Description|_. Default|_. Example|
 |user|Twitter user name| _arc_twitter username_|user=&quot;drmonkeyninja&quot;|
 |limit|Maximum number of tweets to display (max. 200)|10|limit=&quot;25&quot;|
+|retweets|Include retweeted tweets in feed|0|retweets=&quot;1&quot;|
+|timeline|Which feed to use for tweets, options include: home, friends, mentions and user|user|timeline=&quot;home&quot;|
 |dateformat|Format that update dates will appear as| _Archive date format_|dateformat=&quot;%b %Oe, %I:%M %p&quot;|
 |label|Label for the top of the list| _no label_|label=&quot;My Twitter timeline&quot;|
 |labeltag|Independent wraptag for label| _unset_|labeltag=&quot;h3&quot;|
