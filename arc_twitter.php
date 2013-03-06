@@ -44,6 +44,10 @@ if (!isset($prefs['arc_twitter_cache_dir']))
   set_pref('arc_twitter_cache_dir',$txpcfg['txpath'].$prefs['tempdir'], 'arc_twitter', 1, 'text_input');
 if (!isset($prefs['arc_twitter_tweet_default']))
   set_pref('arc_twitter_tweet_default', 1, 'arc_twitter', 2, 'yesnoRadio');
+if (!isset($prefs['arc_twitter_retweets']))
+  set_pref('arc_twitter_retweets', 0, 'arc_twitter', 2, 'yesnoRadio');
+if (!isset($prefs['arc_twitter_SQL']))
+  set_pref('arc_twitter_SQL', 0, 'arc_twitter', 2, 'yesnoRadio');
 if (!isset($prefs['arc_twitter_url_method']))
   set_pref('arc_twitter_url_method', 'tinyurl', 'arc_twitter', 2,
     'arc_twitter_url_method_select');
@@ -97,8 +101,10 @@ function arc_twitter($atts)
     'password'  => '',
     'timeline'  => 'user',
     'limit'     => '10',
+    'limitfrom' => '0',
     'fetch'     => 0,
-    'retweets'  => false,
+    'retweets'  => $prefs['arc_twitter_retweets'],
+    'useSQL'    => $prefs['arc_twitter_SQL'],
     'replies'   => true,
     'dateformat'=> $prefs['archive_dateformat'],
     'caching'   => '1',
@@ -112,6 +118,7 @@ function arc_twitter($atts)
     'class_posted' => __FUNCTION__.'-posted'
     ),$atts));
 
+  $limit +=$limitfrom;
   $twit = new arc_twitter($arc_twitter_consumerKey
             , $arc_twitter_consumerSecret, $prefs['arc_twitter_accessToken']
             , $prefs['arc_twitter_accessTokenSecret']);
@@ -123,6 +130,7 @@ function arc_twitter($atts)
   } else {  // turn off caching, not recommended other than for testing
     $twit->setCaching(false);
   }
+  $twit->setSQL($useSQL);
         
   switch ($timeline) {
     case 'home': case 'friends':
@@ -142,16 +150,35 @@ function arc_twitter($atts)
       'include_rts'=>$retweets,
       'exclude_replies'=>!$replies
     ));
+
   if ($xml) {
-    $tweets = @$xml->xpath('/statuses/status');
+    if(isset($useSQL) && $useSQL)
+      $tweets = $xml;
+    else
+      $tweets = @$xml->xpath('/statuses/status');	
     if ($tweets) {
       // Apply the display limit to the returned tweets
-      $tweets = array_slice($tweets, 0, $limit);
+      $tweets = array_slice($tweets, $limitfrom, $limit-$limitfrom);
       foreach ($tweets as $tweet) {
-        $time = strtotime(htmlentities($tweet->created_at));
+        if(isset($useSQL) && $useSQL)
+          $time = $tweet['created_at'];
+        else
+          $time = $tweet->created_at;
+        $time = strtotime(htmlentities($time));
         $date = safe_strftime($dateformat,$time);
-        $out[] = arc_Twitter::makeLinks(htmlentities($tweet->text, ENT_QUOTES,'UTF-8'))
-          .' '.tag(htmlentities($date),'span',' class="'.$class_posted.'"');
+        if(isset($useSQL) && $useSQL)
+          $text = str_replace("&amp;","&",$tweet['text']);
+        else
+		  $text = $tweet->text;
+        $out[] = arc_Twitter::makeLinks(htmlentities($text, ENT_QUOTES,'UTF-8')).' '.tag(htmlentities($date),'span',' class="'.$class_posted.'"');
+		if(isset($retweets) && $retweets) {
+		  if(isset($useSQL) && $useSQL && isset($tweet['retweeted']))
+		    $retweeted=$tweet['retweeted'];
+		  elseif(isset($tweet->retweeted))
+		    $retweeted=$tweet->retweeted;
+		  if(isset($retweeted) && $retweeted!="" && $retweeted!="false")
+			$out[count($out)-1]='<span class="rt" id="rt">'.arc_Twitter::makeLinks(htmlentities("RT @".$retweeted.": ", ENT_QUOTES,'UTF-8')).'</span>'.$out[count($out)-1];
+		}
       }
     }
 
@@ -563,6 +590,8 @@ function arc_twitter_prefs($event,$step)
     $user          = $prefs['arc_twitter_user'];
     $prefix        = $prefs['arc_twitter_prefix'];
     $suffix        = $prefs['arc_twitter_suffix'];
+    $retweets      = $prefs['arc_twitter_retweets'];
+    $useSQL        = $prefs['arc_twitter_SQL'];
     $tweet_default = $prefs['arc_twitter_tweet_default'];
     $url_method    = $prefs['arc_twitter_url_method'];
     $short_url     = $prefs['arc_short_url'];
@@ -619,6 +648,8 @@ function arc_twitter_prefs($event,$step)
     if ($step=="prefs_save") {
         $prefix = trim(gps('arc_twitter_prefix'));
         $suffix = trim(gps('arc_twitter_suffix'));
+        $retweets = gps('arc_twitter_retweets');
+        $useSQL = gps('arc_twitter_SQL');
         $tweet_default = gps('arc_twitter_tweet_default');
         $url_method = gps('arc_twitter_url_method');
         $short_url = gps('arc_short_url');
@@ -638,6 +669,8 @@ function arc_twitter_prefs($event,$step)
         $tweet_default = ($tweet_default) ? 1 : 0;
         $short_url = ($short_url) ? 1 : 0;
         if (!$short_site_url) $short_site_url = $prefs['siteurl'];
+        set_pref('arc_twitter_retweets',$retweets);
+        set_pref('arc_twitter_SQL',$useSQL);
         set_pref('arc_twitter_tweet_default',$tweet_default);
         set_pref('arc_short_url',$short_url);
         set_pref('arc_twitter_url_method',$url_method);
@@ -663,9 +696,12 @@ function arc_twitter_prefs($event,$step)
 					),
 					'arc_twitter_suffix' => array(
 						'label' => 'Tweet suffix',
-						'value' => $prefix
-					),
-					'arc_twitter_tweet_default' => array(
+						'value' => $suffix
+					),'arc_twitter_retweets' => array(
+						'label' => 'Include retweets',
+						'type' => 'yesnoRadio',
+						'value' => $retweets					
+					),'arc_twitter_tweet_default' => array(
 						'label' => 'Tweet articles by default',
 						'type' => 'yesnoRadio',
 						'value' => $tweet_default
@@ -695,6 +731,11 @@ function arc_twitter_prefs($event,$step)
 					)
 				),
 				'Cache' => array(
+					'arc_twitter_SQL' => array(
+						'label' => 'Use SQL (vs. file cache)',
+						'type' => 'yesnoRadio',
+						'value' => $useSQL
+					),
 					'arc_twitter_cache_dir' => array(
 						'label' => 'Cache directory',
 						'value' => $cache_dir
@@ -1219,48 +1260,45 @@ class arc_twitter extends TwitterOAuth {
 
     // create Twitter and external links in text
     public static function makeLinks($text)
-    {
-		
-		$replacements = array(
+    {		
+	$replacements = array(
 			'/\b(http|https|ftp):\/\/([A-Z0-9][A-Z0-9_-]*(?:\.[A-Z0-9][A-Z0-9_-]*)+):?(\d+)?\/?([\/\w+\.]+)\b/i' => "<a href='$0' rel='external'>$0</a>",
 			'/\b(^|\s)www.([a-z_A-Z0-9]+)((\.[a-z]+)+)\b/i' => "<a href='http://www.$2$3' rel='external'>www.$2$3</a>",
 			"/(^|\s).?@([a-z_A-Z0-9]+)/" => "$1@<a href='http://twitter.com/$2' rel='external'>$2</a>",
 			"/(^|\s)(\#([a-z_A-Z0-9:_-]+))/" => "$1<a href='http://twitter.com/search?q=%23$3' rel='external'>$2</a>"
 		);
-        return preg_replace(array_keys($replacements), array_values($replacements), $text);
-        
+        return preg_replace(array_keys($replacements), array_values($replacements), $text);    
   }
 
     public function get($url, $params = array())
     {
         $api_url = md5($url.urlencode(serialize($params)));
         $data = '';
+		$limit=$params['count'];
 
         if ($this->_cache) { // check for cached xml
-
-            $data = $this->_retrieveCache($api_url);
-
+            $data = $this->_retrieveCache($api_url,$limit,false,$params['since_id']);
+			if(!isset($params['since_id']))
+				unset($params['since_id']);
         }
         if (empty($data)) {
             $data = parent::get($url, $params);
             if ($this->http_code===200 && $xml=simplexml_load_string($data)) { // save cache
-                $file = $this->_cache_dir.'/'.$api_url;
-                file_put_contents($file,$data,LOCK_EX);
+				$file = $this->_cache_dir.'/'.$api_url;
+				$this->_saveCache($file,$data);
                 return $xml;
             } else { // failed to retrieve data from Twitter
-
-                if ($this->_cache) { // attempt to force cached xml return
-
-                    $data = $this->_retrieveCache($api_url,true);
+				if ($this->_cache) { // attempt to force cached xml return
+                    $data = $this->_retrieveCache($api_url,$limit,true,$params['since_id']);
                     if ($data) return @simplexml_load_string($data);
-
                 }
-
                 return false;
-
             }
         } else { // return cached xml
-            return @simplexml_load_string($data);
+			if(is_array($data))
+				return $data;
+			else
+	            return @simplexml_load_string($data);
         }
     } //end get()
 
@@ -1284,6 +1322,12 @@ class arc_twitter extends TwitterOAuth {
         return true;
     }
 
+	public function setSQL($useSQL=false)
+    {
+        $this->_useSQL = ($useSQL) ? true : false;
+        return true;
+    }
+
     public function cacheDir($loc)
     {
         $this->_cache_dir = $loc;
@@ -1296,21 +1340,78 @@ class arc_twitter extends TwitterOAuth {
         return true;
     }
 
-    private function _retrieveCache($url,$overide_timeout=false)
+	private function _retrieveCache($url,$limit,$overide_timeout=false,&$last_tweet_id=NULL)
     {
-        $file = $this->_cache_dir.'/'.$url;
-        if (file_exists($file)) {
+		if(isset($this->_useSQL) && $this->_useSQL)
+			return $this->_retrieveCacheDB($limit,$overide_timeout,$last_tweet_id);
+		else
+			return $this->_retrieveCacheFile($url,$overide_timeout);
+	}
 
+    private function _retrieveCacheDB($limit,$overide_timeout,&$last_tweet_id)
+    {
+		if(empty($limit)||$limit<1)
+			$limit=1;
+		$rs = safe_rows("`ID`,`tweet_id`,`text`,`retweeted`,`created_at`,TIME_TO_SEC(TIMEDIFF(NOW(),accessed_at)) as `time_diff`", "ila_twitter", "`retweeted` IS NULL OR `retweeted` IS NOT NULL ORDER BY `tweet_id` DESC LIMIT ".$limit);
+		if($rs)
+		{
+			$diff = $rs[0]['time_diff'];
+			$last_tweet_id=$rs[0]['tweet_id']; //so we start fetching from it
+			if ($overide_timeout || $diff < $this->_cache_time) {
+				return $rs;
+            }
+        }
+		return null;
+    }
+
+    private function _retrieveCacheFile($url,$overide_timeout)
+    {
+		$file = $this->_cache_dir.'/'.$url;
+        if (file_exists($file)) {
             $diff = time() - filemtime($file);
             if ($overide_timeout || $diff < $this->_cache_time) {
                 return file_get_contents($file);
             } else {
                 return false;
             }
-
         } else {
             return false;
         }
+    }
+
+	private function _saveCache($file,$data)
+    {
+		if(!isset($this->_useSQL) || !$this->_useSQL) 
+		{
+			file_put_contents($file,$data,LOCK_EX);
+		}
+		else
+		{
+			$tweets=simplexml_load_string($data);
+			// save cache
+			if ($tweets && count($tweets)>0) {
+				$sql = "INSERT INTO ".PFX."ila_twitter (`tweet_id`,`text`,`retweeted`,`created_at`,`XML`) VALUES";
+				foreach ($tweets as $tweet) {
+					$retweeted = "";
+					$text = $tweet->text;
+					if(isset($tweet->retweeted_status))
+					{
+						$retweeted=$tweet->retweeted_status->user->screen_name;
+						$text = $tweet->retweeted_status->text;
+					}
+					$time = strtotime(htmlentities($tweet->created_at));
+					$date = strftime("%Y-%m-%d %H:%M:%S",$time);
+					$sql.= "\r\n (\"$tweet->id\",\"".addslashes($text)."\",\"$retweeted\",\"$date\",\"".addslashes($tweet->asXML())."\"),";
+				}
+				$sql=substr($sql,0,-1) . " ON DUPLICATE KEY UPDATE accessed_at=NOW()";
+				safe_query($sql);
+			}
+			//Nothing to update, update cache time
+			else { 
+				$sql = "UPDATE ".PFX."ila_twitter SET accessed_at=NOW() ORDER BY `tweet_id` DESC LIMIT 1";
+				safe_query($sql);
+			}
+		}
     }
 }
 
@@ -1454,6 +1555,8 @@ class TwitterOAuth {
    * GET wrapper for oAuthRequest.
    */
   function get($url, $parameters = array()) {
+	if(isset($parameters['since_id']))
+		unset($parameters['count']);
     $response = $this->oAuthRequest($url, 'GET', $parameters);
     if ($this->format === 'json' && $this->decode_json) {
       return json_decode($response);
@@ -2421,8 +2524,7 @@ class OAuthUtil {
     // Each name-value pair is separated by an '&' character (ASCII code 38)
     return implode('&', $pairs);
   }
-}
-# --- END PLUGIN CODE ---
+}# --- END PLUGIN CODE ---
 if (0) {
 ?>
 <!--
